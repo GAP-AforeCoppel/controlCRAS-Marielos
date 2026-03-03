@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Consultas CRA's - Marielos</title>
+    
+    <!-- Tailwind CSS para el diseño -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Dependencias adicionales requeridas para la compatibilidad de Recharts UMD -->
+    <script crossorigin src="https://unpkg.com/react-is@18/umd/react-is.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    
+    <!-- Babel para compilar JSX en el navegador -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Recharts para las gráficas interactivas -->
+    <script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.js"></script>
+
+    <!-- PapaParse para leer tu archivo CSV publicado -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #f0f4f8; 
+        }
+        .coppel-blue { color: #004b87; }
+        .bg-coppel-blue { background-color: #004b87; }
+        .coppel-yellow { color: #ffd100; }
+        .bg-coppel-yellow { background-color: #ffd100; }
+        
+        .loader {
+            border: 4px solid #e5e7eb;
+            border-top: 4px solid #004b87;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+        const { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, ResponsiveContainer, LabelList } = window.Recharts;
+
+        // URL del CSV de tu documento de Google Sheets
+        const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR8NYdhgKsqG-iQHp3gLRj97QmFiGlUDr2dqEOD9ETWz2KvV28RFNQTRm2IAqlonA/pub?gid=1686329315&single=true&output=csv";
+
+        const extractUniqueOptions = (data, colName, defaultLabel) => {
+            if (!colName) return [defaultLabel];
+            const uniqueSet = new Set();
+            data.forEach(row => {
+                const val = row[colName];
+                if (val && String(val).trim() !== '') uniqueSet.add(String(val).trim());
+            });
+            return [defaultLabel, ...Array.from(uniqueSet).sort()];
+        };
+
+        function App() {
+            const [data, setData] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [columns, setColumns] = useState([]);
+            
+            // Estados de Filtros
+            const [selectedMonth, setSelectedMonth] = useState("Todos"); 
+            const [selectedWeek, setSelectedWeek] = useState("Todas"); 
+            const [selectedDay, setSelectedDay] = useState("Todos"); 
+            const [selectedCoordinator, setSelectedCoordinator] = useState("Todos"); 
+            const [selectedCity, setSelectedCity] = useState("Todas");
+            const [selectedState, setSelectedState] = useState("Todos");
+            const [selectedRegion, setSelectedRegion] = useState("Todas");
+            const [selectedDivision, setSelectedDivision] = useState("Todas");
+            const [selectedEscalamiento, setSelectedEscalamiento] = useState("Todos"); // Nuevo filtro
+            
+            // Estados Interactivos
+            const [selectedStatus, setSelectedStatus] = useState("Todos"); 
+            const [selectedMotivo, setSelectedMotivo] = useState("Todos"); 
+
+            useEffect(() => {
+                Papa.parse(CSV_URL, {
+                    download: true,
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: (results) => {
+                        if (results.data && results.data.length > 0) {
+                            const allColumns = Object.keys(results.data[0]);
+                            
+                            const fechaCol = allColumns.find(col => {
+                                const colName = col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                return colName.includes('fecha') && colName.includes('recep');
+                            }) || allColumns.find(col => col.toLowerCase().includes('fecha')) || allColumns[0];
+
+                            const validData = results.data.filter(row => {
+                                const fechaVal = row[fechaCol];
+                                return fechaVal !== null && fechaVal !== undefined && String(fechaVal).trim() !== "";
+                            }).map(row => {
+                                const fechaVal = row[fechaCol];
+                                let mesText = 'Desconocido';
+                                let mesKey = '';
+                                let semanaText = 'Desconocido';
+                                let semanaKey = '';
+                                let diaText = 'Desconocido';
+                                let diaKey = '';
+                                try {
+                                    if (fechaVal) {
+                                        const parts = String(fechaVal).split(/[\/\-\s]/);
+                                        if(parts.length >= 3) {
+                                            let dateObj = null;
+                                            if(parts[0].length === 4) { 
+                                                dateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                                            } else { 
+                                                dateObj = new Date(parseInt(parts[2].substring(0, 4)), parseInt(parts[1]) - 1, parseInt(parts[0]));
+                                            }
+
+                                            if (dateObj && !isNaN(dateObj.getTime())) {
+                                                const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                                                mesText = `${meses[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+                                                mesKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2, '0')}`;
+
+                                                const day = dateObj.getDay() || 7; 
+                                                const monday = new Date(dateObj);
+                                                monday.setDate(dateObj.getDate() - (day - 1));
+                                                const sunday = new Date(monday);
+                                                sunday.setDate(monday.getDate() + 6);
+
+                                                const formatDay = (dt) => `${dt.getDate()} ${meses[dt.getMonth()].substring(0,3)}`;
+                                                semanaText = `${formatDay(monday)} al ${formatDay(sunday)} (${monday.getFullYear()})`;
+                                                semanaKey = `${monday.getFullYear()}-${String(monday.getMonth()+1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+                                                
+                                                diaText = `${dateObj.getDate()} ${meses[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+                                                diaKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+                                            }
+                                        }
+                                    }
+                                } catch(e) {}
+                                return { ...row, _mes: mesText, _mesKey: mesKey, _semana: semanaText, _semanaKey: semanaKey, _dia: diaText, _diaKey: diaKey };
+                            });
+                            
+                            setData(validData);
+                            if (validData.length > 0) {
+                                // Filtro inteligente para eliminar columnas duplicadas y ocultar columnas innecesarias
+                                let seenRegion = false;
+                                let seenCoord = false;
+                                let seenDivision = false;
+
+                                const finalCols = Object.keys(validData[0]).filter(key => {
+                                    if (key.startsWith('_')) return false; // Ocultar columnas internas de fecha
+                                    
+                                    const norm = key.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                    
+                                    // Ocultar columnas específicas solicitadas (Para vista de tabla)
+                                    if (
+                                        (norm.includes('fecha') && norm.includes('inicio')) ||
+                                        (norm.includes('fecha') && norm.includes('cierre')) ||
+                                        norm.includes('observacion') ||
+                                        norm.includes('notificacion') ||
+                                        norm.includes('comercial_1')
+                                    ) {
+                                        return false;
+                                    }
+
+                                    // Filtrar duplicados de Coordinador
+                                    if (norm.includes('coordinador')) {
+                                        if (seenCoord) return false;
+                                        seenCoord = true;
+                                        return true;
+                                    }
+                                    
+                                    // Filtrar duplicados de División
+                                    if (norm.includes('division')) {
+                                        if (seenDivision) return false;
+                                        seenDivision = true;
+                                        return true;
+                                    }
+                                    
+                                    // Filtrar duplicados de Región
+                                    if (norm.includes('region')) {
+                                        if (seenRegion) return false;
+                                        seenRegion = true;
+                                        return true;
+                                    }
+                                    
+                                    return true;
+                                });
+                                
+                                setColumns(finalCols);
+                            } else {
+                                setColumns(allColumns);
+                            }
+                        }
+                        setLoading(false);
+                    },
+                    error: (err) => {
+                        setError("Error al conectar con Google Sheets.");
+                        setLoading(false);
+                    }
+                });
+            }, []);
+
+            // 1. Identificamos columnas (Para Lógica interna)
+            // Tomamos los nombres originales buscando en los keys del data original
+            const originalHeaders = data.length > 0 ? Object.keys(data[0]) : [];
+
+            const coordColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('coord')), [originalHeaders]);
+            const cityColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('ciudad') || col.toLowerCase().includes('cuidad')), [originalHeaders]);
+            const stateColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('estado')), [originalHeaders]);
+            const regionColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('region')), [originalHeaders]);
+            const divColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('division')), [originalHeaders]);
+            
+            const escalamientoColName = useMemo(() => originalHeaders.find(col => {
+                const norm = col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f¿?]/g, "");
+                return norm.includes('escalamiento') && norm.includes('valido');
+            }) || originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f¿?]/g, "").includes('escalamiento')), [originalHeaders]);
+
+            const atendidoColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f¿?]/g, "").includes('atendido')) || originalHeaders.find(col => col.toLowerCase().includes('estatus')), [originalHeaders]);
+            const motivoDepColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('motivo') && col.toLowerCase().includes('dependencia')) || originalHeaders[1], [originalHeaders]);
+            const tipoColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('tipo')) || originalHeaders[2], [originalHeaders]);
+            const tramiteColName = useMemo(() => originalHeaders.find(col => {
+                const norm = col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                return norm.includes('tramite') || norm.includes('asunto');
+            }), [originalHeaders]);
+            const situacionColName = useMemo(() => originalHeaders.find(col => col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('situacion')), [originalHeaders]);
+
+            // Columnas para SLA
+            const fechaInicioColName = useMemo(() => originalHeaders.find(col => {
+                const norm = col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                return norm.includes('fecha') && norm.includes('inicio');
+            }), [originalHeaders]);
+            const fechaCierreColName = useMemo(() => originalHeaders.find(col => {
+                const norm = col.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                return norm.includes('fecha') && norm.includes('cierre');
+            }), [originalHeaders]);
+
+            // 2. Función de cascada
+            const applyFiltersExcept = (excludeKey) => {
+                return data.filter(row => {
+                    if (excludeKey !== 'month' && selectedMonth !== "Todos" && row._mes !== selectedMonth) return false;
+                    if (excludeKey !== 'week' && selectedWeek !== "Todas" && row._semana !== selectedWeek) return false;
+                    if (excludeKey !== 'day' && selectedDay !== "Todos" && row._dia !== selectedDay) return false;
+                    if (excludeKey !== 'coord' && selectedCoordinator !== "Todos" && coordColName && row[coordColName] !== selectedCoordinator) return false;
+                    if (excludeKey !== 'city' && selectedCity !== "Todas" && cityColName && row[cityColName] !== selectedCity) return false;
+                    if (excludeKey !== 'state' && selectedState !== "Todos" && stateColName && row[stateColName] !== selectedState) return false;
+                    if (excludeKey !== 'region' && selectedRegion !== "Todas" && regionColName && row[regionColName] !== selectedRegion) return false;
+                    if (excludeKey !== 'division' && selectedDivision !== "Todas" && divColName && row[divColName] !== selectedDivision) return false;
+                    if (excludeKey !== 'escalamiento' && selectedEscalamiento !== "Todos" && escalamientoColName && row[escalamientoColName] !== selectedEscalamiento) return false;
+                    return true;
+                });
+            };
+
+            // 3. Listas disponibles
+            const filterDeps = [data, selectedMonth, selectedWeek, selectedDay, selectedCoordinator, selectedCity, selectedState, selectedRegion, selectedDivision, selectedEscalamiento];
+            
+            const availableMonths = useMemo(() => ["Todos", ...Array.from(new Set(applyFiltersExcept('month').map(r => r._mes).filter(m => m && m !== 'Desconocido')))], filterDeps);
+            const availableWeeks = useMemo(() => ["Todas", ...Array.from(new Set(applyFiltersExcept('week').map(r => r._semana).filter(s => s && s !== 'Desconocido')))], filterDeps);
+            const availableDays = useMemo(() => ["Todos", ...Array.from(new Set(applyFiltersExcept('day').map(r => r._dia).filter(d => d && d !== 'Desconocido')))], filterDeps);
+            
+            const availableCoordinators = useMemo(() => extractUniqueOptions(applyFiltersExcept('coord'), coordColName, "Todos"), filterDeps);
+            const availableCities = useMemo(() => extractUniqueOptions(applyFiltersExcept('city'), cityColName, "Todas"), filterDeps);
+            const availableStates = useMemo(() => extractUniqueOptions(applyFiltersExcept('state'), stateColName, "Todos"), filterDeps);
+            const availableRegions = useMemo(() => extractUniqueOptions(applyFiltersExcept('region'), regionColName, "Todas"), filterDeps);
+            const availableDivisions = useMemo(() => extractUniqueOptions(applyFiltersExcept('division'), divColName, "Todas"), filterDeps);
+            const availableEscalamientos = useMemo(() => extractUniqueOptions(applyFiltersExcept('escalamiento'), escalamientoColName, "Todos"), filterDeps);
+
+            // 4. Autocorrección
+            useEffect(() => {
+                if (selectedMonth !== "Todos" && !availableMonths.includes(selectedMonth)) setSelectedMonth("Todos");
+                if (selectedWeek !== "Todas" && !availableWeeks.includes(selectedWeek)) setSelectedWeek("Todas");
+                if (selectedDay !== "Todos" && !availableDays.includes(selectedDay)) setSelectedDay("Todos");
+                if (selectedCoordinator !== "Todos" && !availableCoordinators.includes(selectedCoordinator)) setSelectedCoordinator("Todos");
+                if (selectedCity !== "Todas" && !availableCities.includes(selectedCity)) setSelectedCity("Todas");
+                if (selectedState !== "Todos" && !availableStates.includes(selectedState)) setSelectedState("Todos");
+                if (selectedRegion !== "Todas" && !availableRegions.includes(selectedRegion)) setSelectedRegion("Todas");
+                if (selectedDivision !== "Todas" && !availableDivisions.includes(selectedDivision)) setSelectedDivision("Todas");
+                if (selectedEscalamiento !== "Todos" && !availableEscalamientos.includes(selectedEscalamiento)) setSelectedEscalamiento("Todos");
+            }, [availableMonths, availableWeeks, availableDays, availableCoordinators, availableCities, availableStates, availableRegions, availableDivisions, availableEscalamientos]);
+
+            useEffect(() => {
+                if (selectedMotivo !== "Todos" && motivoDepColName) {
+                    const hasMotivo = applyFiltersExcept('none').some(row => (row[motivoDepColName] || 'Sin especificar') === selectedMotivo);
+                    if (!hasMotivo) setSelectedMotivo("Todos");
+                }
+            }, [...filterDeps, selectedMotivo]);
+
+            // Función Helper para parsear Fechas de SLA
+            const parseCustomDate = (dateStr) => {
+                if (!dateStr) return null;
+                try {
+                    const parts = String(dateStr).split(/[\/\-\s]/);
+                    if(parts.length >= 3) {
+                        if(parts[0].length === 4) return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                        return new Date(parseInt(parts[2].substring(0, 4)), parseInt(parts[1]) - 1, parseInt(parts[0]));
+                    }
+                } catch(e) {}
+                return null;
+            };
+
+            // 5. Data Base
+            const filteredData = useMemo(() => applyFiltersExcept('none'), filterDeps);
+
+            // Datos a mostrar filtrados por KPI y por el clic en gráfica
+            const displayData = useMemo(() => {
+                let result = filteredData;
+                
+                if (selectedStatus !== "Todos") {
+                    result = result.filter(row => {
+                        const valorAtendido = (row[atendidoColName] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                        const isResuelto = valorAtendido === 'si';
+                        
+                        const escVal = String(row[escalamientoColName] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                        const isInvalid = escVal === 'no' || escVal.includes('invalid');
+
+                        if (selectedStatus === "Resueltos") return isResuelto;
+                        if (selectedStatus === "En Seguimiento") return !isResuelto;
+                        if (selectedStatus === "Inválidos") return isInvalid;
+                        return true;
+                    });
+                }
+
+                if (selectedMotivo !== "Todos") {
+                    result = result.filter(row => (row[motivoDepColName] || 'Sin especificar') === selectedMotivo);
+                }
+
+                return result;
+            }, [filteredData, selectedStatus, selectedMotivo, atendidoColName, motivoDepColName, escalamientoColName]);
+
+            // KPIs & Gráficas
+            const analytics = useMemo(() => {
+                if (!filteredData.length) return null;
+
+                let totalCasos = filteredData.length;
+                let finalizados = 0;
+                let enProceso = 0;
+                let totalInvalidos = 0;
+                
+                // Para SLA
+                let totalDiasResolucion = 0;
+                let casosConSLA = 0;
+
+                const motivoCounts = {};
+                const tipoCounts = {};
+                const tramiteCounts = {};
+                const situacionCounts = {};
+                
+                // Para Tendencia y Top 5
+                const tendenciaCounts = {};
+                const coordCounts = {};
+                let validosChart = 0;
+                let invalidosChart = 0;
+
+                // Lógica de Agrupación de Tiempo Dinámica para Tendencias
+                let timeMode = 'Semana';
+                let keyProp = '_semanaKey';
+                let labelProp = '_semana';
+
+                if (selectedWeek !== "Todas" || selectedDay !== "Todos") {
+                    timeMode = 'Día';
+                    keyProp = '_diaKey';
+                    labelProp = '_dia';
+                }
+
+                // Cálculos base para los cuadros superiores
+                filteredData.forEach(row => {
+                    const valorAtendido = (row[atendidoColName] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                    if (valorAtendido === 'si') finalizados++; else enProceso++;
+
+                    if (escalamientoColName) {
+                        const escVal = String(row[escalamientoColName] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                        if (escVal === 'no' || escVal.includes('invalid')) totalInvalidos++;
+                    }
+                });
+
+                // Cálculos para gráficas con los datos en pantalla
+                displayData.forEach(row => {
+                    // Motivos
+                    const motivo = row[motivoDepColName] || 'Sin especificar';
+                    if (!motivoCounts[motivo]) motivoCounts[motivo] = { Validos: 0, Invalidos: 0, Casos: 0 };
+                    motivoCounts[motivo].Casos++;
+
+                    // Tipo
+                    const tipo = row[tipoColName] || 'Sin especificar';
+                    tipoCounts[tipo] = (tipoCounts[tipo] || 0) + 1;
+                    
+                    // Trámite
+                    const tramite = row[tramiteColName] || 'Sin especificar';
+                    tramiteCounts[tramite] = (tramiteCounts[tramite] || 0) + 1;
+
+                    // Situación
+                    if (situacionColName) {
+                        const situacion = row[situacionColName] || 'Sin especificar';
+                        situacionCounts[situacion] = (situacionCounts[situacion] || 0) + 1;
+                    }
+
+                    // Tendencia (Dinámica según Filtros)
+                    const timeKey = row[keyProp] || 'Z_Desconocido';
+                    const timeLabel = row[labelProp] || 'Desconocido';
+                    if (!tendenciaCounts[timeKey]) tendenciaCounts[timeKey] = { label: timeLabel, Casos: 0, Validos: 0, Invalidos: 0 };
+                    tendenciaCounts[timeKey].Casos++;
+
+                    // Escalamiento (Válidos vs Inválidos)
+                    let isInvalid = false;
+                    if (escalamientoColName) {
+                        const escVal = String(row[escalamientoColName] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                        if (escVal === 'no' || escVal.includes('invalid')) {
+                            isInvalid = true;
+                            invalidosChart++;
+                            motivoCounts[motivo].Invalidos++;
+                            tendenciaCounts[timeKey].Invalidos++;
+                        } else {
+                            validosChart++;
+                            motivoCounts[motivo].Validos++;
+                            tendenciaCounts[timeKey].Validos++;
+                        }
+                    }
+
+                    // Top Coordinadores
+                    if (coordColName) {
+                        const coord = row[coordColName] || 'Sin Asignar';
+                        if (!coordCounts[coord]) coordCounts[coord] = { Validos: 0, Invalidos: 0, Total: 0 };
+                        coordCounts[coord].Total++;
+                        if (isInvalid) coordCounts[coord].Invalidos++;
+                        else coordCounts[coord].Validos++;
+                    }
+
+                    // Cálculo SLA
+                    if (fechaInicioColName && fechaCierreColName) {
+                        const fIni = parseCustomDate(row[fechaInicioColName]);
+                        const fFin = parseCustomDate(row[fechaCierreColName]);
+                        if (fIni && fFin && fFin >= fIni) {
+                            const diffDays = (fFin.getTime() - fIni.getTime()) / (1000 * 3600 * 24);
+                            totalDiasResolucion += diffDays;
+                            casosConSLA++;
+                        }
+                    }
+                });
+
+                // Preparación de arreglos finales para gráficas
+                const chartDataMotivoDep = Object.keys(motivoCounts).map(key => ({ 
+                    name: key, 
+                    Validos: motivoCounts[key].Validos,
+                    Invalidos: motivoCounts[key].Invalidos,
+                    Casos: motivoCounts[key].Casos 
+                })).sort((a, b) => b.Casos - a.Casos);
+                
+                const chartDataTipo = Object.keys(tipoCounts).map(key => ({ name: key, value: tipoCounts[key] })).sort((a, b) => b.value - a.value);
+                const chartDataTramite = Object.keys(tramiteCounts).map(key => ({ name: key, Casos: tramiteCounts[key] })).sort((a, b) => b.Casos - a.Casos);
+                const resumenSituacion = Object.keys(situacionCounts).map(key => ({ name: key, value: situacionCounts[key] })).sort((a, b) => b.value - a.value);
+                
+                const chartDataEscalamiento = [
+                    { name: 'Válidos', value: validosChart },
+                    { name: 'Inválidos', value: invalidosChart }
+                ].filter(d => d.value > 0);
+
+                const chartDataTendencia = Object.keys(tendenciaCounts).sort().map(k => ({
+                    name: tendenciaCounts[k].label,
+                    Casos: tendenciaCounts[k].Casos,
+                    Validos: tendenciaCounts[k].Validos,
+                    Invalidos: tendenciaCounts[k].Invalidos
+                })).filter(d => d.name !== 'Desconocido'); // Ocultar fechas nulas de la línea de tiempo
+
+                const top5Coordinadores = Object.keys(coordCounts)
+                    .map(k => ({ name: k, ...coordCounts[k] }))
+                    .sort((a, b) => b.Total - a.Total)
+                    .slice(0, 5);
+
+                const slaPromedio = casosConSLA > 0 ? (totalDiasResolucion / casosConSLA).toFixed(1) : null;
+
+                return { totalCasos, finalizados, enProceso, totalInvalidos, chartDataMotivoDep, chartDataTipo, chartDataEscalamiento, chartDataTramite, resumenSituacion, chartDataTendencia, top5Coordinadores, slaPromedio, timeMode };
+            }, [filteredData, displayData, atendidoColName, motivoDepColName, tipoColName, escalamientoColName, tramiteColName, situacionColName, coordColName, fechaInicioColName, fechaCierreColName, selectedWeek, selectedDay]);
+
+            if (loading) {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-screen bg-[#f0f4f8]">
+                        <div className="loader mb-6"></div>
+                        <p className="text-[#004b87] font-bold text-xl">Sincronizando con tu base de datos...</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen p-4 md:p-8">
+                    <header className="mb-6 bg-white p-6 rounded-2xl shadow-sm border-t-8 border-[#004b87]">
+                        <h1 className="text-3xl font-extrabold coppel-blue mb-1">Control de Consultas CRA's</h1>
+                    </header>
+
+                    {/* Filtros */}
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-8">
+                        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
+                            <svg className="w-5 h-5 text-[#004b87]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg>
+                            <span className="text-[#004b87] font-bold text-sm uppercase tracking-wider">Filtros de Búsqueda</span>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                            {/* Fechas */}
+                            <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">Mes</label><select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableMonths.map(o => <option key={o} value={o}>{o === "Todos" ? "Todos los meses" : o}</option>)}</select></div>
+                            <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">Semana</label><select value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableWeeks.map(o => <option key={o} value={o}>{o === "Todas" ? "Todas las semanas" : o}</option>)}</select></div>
+                            <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">Día</label><select value={selectedDay} onChange={e => setSelectedDay(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableDays.map(o => <option key={o} value={o}>{o === "Todos" ? "Todos los días" : o}</option>)}</select></div>
+                            
+                            {/* Operativos */}
+                            {coordColName && <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">Coordinador</label><select value={selectedCoordinator} onChange={e => setSelectedCoordinator(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableCoordinators.map(o => <option key={o} value={o}>{o === "Todos" ? "Todos los coordinadores" : o}</option>)}</select></div>}
+                            {cityColName && <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">Ciudad</label><select value={selectedCity} onChange={e => setSelectedCity(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableCities.map(o => <option key={o} value={o}>{o === "Todas" ? "Todas las ciudades" : o}</option>)}</select></div>}
+                            {stateColName && <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">Estado</label><select value={selectedState} onChange={e => setSelectedState(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableStates.map(o => <option key={o} value={o}>{o === "Todos" ? "Todos los estados" : o}</option>)}</select></div>}
+                            {regionColName && <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">Región</label><select value={selectedRegion} onChange={e => setSelectedRegion(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableRegions.map(o => <option key={o} value={o}>{o === "Todas" ? "Todas las regiones" : o}</option>)}</select></div>}
+                            {divColName && <div className="flex flex-col"><label className="text-xs font-bold text-gray-500 mb-1 ml-1 uppercase">División</label><select value={selectedDivision} onChange={e => setSelectedDivision(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border rounded-xl bg-gray-50 text-sm font-medium">{availableDivisions.map(o => <option key={o} value={o}>{o === "Todas" ? "Todas las divisiones" : o}</option>)}</select></div>}
+                            
+                            {/* Nuevo Filtro Escalamiento */}
+                            {escalamientoColName && (
+                                <div className="flex flex-col">
+                                    <label className="text-xs font-bold text-[#ef4444] mb-1 ml-1 uppercase flex items-center gap-1">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                        ¿Escalamiento Válido?
+                                    </label>
+                                    <select value={selectedEscalamiento} onChange={e => setSelectedEscalamiento(e.target.value)} className="w-full pl-4 pr-10 py-2.5 border border-red-200 rounded-xl bg-red-50 focus:ring-red-500 text-sm font-medium text-red-900">{availableEscalamientos.map(o => <option key={o} value={o}>{o === "Todos" ? "Todas las respuestas" : o}</option>)}</select>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Tarjetas KPIs */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        <div onClick={() => setSelectedStatus("Todos")} className={`bg-white p-5 rounded-2xl shadow-sm border flex items-center justify-between cursor-pointer ${selectedStatus === "Todos" ? "ring-2 ring-[#004b87] bg-blue-50/20" : "hover:shadow-md"}`}>
+                            <div><h3 className="text-gray-500 text-xs font-bold uppercase mb-1">Total Filtrados</h3><p className="text-3xl font-black text-gray-800">{analytics?.totalCasos || 0}</p></div>
+                            <div className="p-3 bg-gray-50 rounded-full text-gray-400"><svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-6 h-6"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg></div>
+                        </div>
+                        <div onClick={() => setSelectedStatus(selectedStatus === "Resueltos" ? "Todos" : "Resueltos")} className={`bg-white p-5 rounded-2xl shadow-sm border flex items-center justify-between cursor-pointer ${selectedStatus === "Resueltos" ? "ring-2 ring-green-500 bg-green-50/50" : "hover:shadow-md"}`}>
+                            <div><h3 className="text-gray-500 text-xs font-bold uppercase mb-1">Resueltos</h3><p className="text-3xl font-black text-green-600">{analytics?.finalizados || 0}</p></div>
+                            <div className="p-3 bg-green-50 rounded-full text-green-500"><svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-6 h-6"><path d="M5 13l4 4L19 7"></path></svg></div>
+                        </div>
+                        <div onClick={() => setSelectedStatus(selectedStatus === "En Seguimiento" ? "Todos" : "En Seguimiento")} className={`bg-white p-5 rounded-2xl shadow-sm border flex items-center justify-between cursor-pointer ${selectedStatus === "En Seguimiento" ? "ring-2 ring-yellow-500 bg-yellow-50/50" : "hover:shadow-md"}`}>
+                            <div><h3 className="text-gray-500 text-xs font-bold uppercase mb-1">En Seguimiento</h3><p className="text-3xl font-black text-yellow-600">{analytics?.enProceso || 0}</p></div>
+                            <div className="p-3 bg-yellow-50 rounded-full text-yellow-500"><svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-6 h-6"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
+                        </div>
+                        {escalamientoColName && (
+                            <div onClick={() => setSelectedStatus(selectedStatus === "Inválidos" ? "Todos" : "Inválidos")} className={`bg-white p-5 rounded-2xl shadow-sm border flex items-center justify-between cursor-pointer ${selectedStatus === "Inválidos" ? "ring-2 ring-red-500 bg-red-50/80" : "border-red-100 hover:shadow-md"}`}>
+                                <div><h3 className="text-red-500 text-xs font-bold uppercase mb-1">Escal. Inválidos</h3><p className="text-3xl font-black text-red-600">{analytics?.totalInvalidos || 0}</p></div>
+                                <div className="p-3 bg-red-50 rounded-full text-red-500"><svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg></div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Gráfica de Tendencia (Nueva - Ocupa todo el ancho) */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-8">
+                        <h3 className="text-lg font-bold coppel-blue mb-6 border-b pb-4">Tendencia de Casos por {analytics?.timeMode || 'Semana'}</h3>
+                        <div className="h-[300px]">
+                            {analytics?.chartDataTendencia && analytics.chartDataTendencia.length > 0 ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={analytics.chartDataTendencia} margin={{ top: 10, right: 30, left: -20, bottom: 20 }}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="name" tick={{fontSize: 11, fill: '#64748b'}} interval="preserveStartEnd" />
+                                        <YAxis tick={{fontSize: 12, fill: '#64748b'}} />
+                                        <Tooltip cursor={{stroke: '#cbd5e1', strokeWidth: 2, strokeDasharray: '3 3'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                                        {escalamientoColName && <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{fontSize: '12px'}} />}
+                                        <Line type="monotone" dataKey="Casos" name="Total de Casos" stroke="#004b87" strokeWidth={3} dot={{r: 4, fill: '#004b87', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 6}} />
+                                        {escalamientoColName && (
+                                            <Line type="monotone" dataKey="Validos" name="Escal. Válidos" stroke="#10b981" strokeWidth={2} dot={{r: 3}} activeDot={{r: 5}} />
+                                        )}
+                                        {escalamientoColName && (
+                                            <Line type="monotone" dataKey="Invalidos" name="Escal. Inválidos" stroke="#ef4444" strokeWidth={2} dot={{r: 3}} activeDot={{r: 5}} />
+                                        )}
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="flex justify-center items-center h-full text-gray-400">Sin datos temporales suficientes</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Gráfica Motivo (Con Drill-Down a Trámite y Situación) */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-8">
+                        <div className="flex flex-col sm:flex-row justify-between mb-4 border-b pb-4 gap-2">
+                            <h3 className="text-lg font-bold coppel-blue flex items-center gap-2">
+                                {selectedMotivo === "Todos" ? "Casos por Motivo Dependencia" : `Desglose de Trámites: ${selectedMotivo}`}
+                            </h3>
+                            {selectedMotivo !== "Todos" ? (
+                                <button onClick={() => setSelectedMotivo("Todos")} className="text-xs text-white bg-[#004b87] hover:bg-blue-800 px-4 py-2 rounded-lg font-bold shadow-sm transition-colors flex items-center gap-1">
+                                    <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                                    Volver a Dependencias
+                                </button>
+                            ) : (
+                                <span className="text-xs text-gray-400 hidden sm:inline-block bg-gray-50 px-3 py-1.5 rounded-full border border-gray-100">
+                                    💡 Da clic en una barra para ver sus trámites
+                                </span>
+                            )}
+                        </div>
+                        <div className="h-[400px]">
+                            {selectedMotivo === "Todos" ? (
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={analytics?.chartDataMotivoDep || []} layout="vertical" margin={{ top: 10, right: 40, left: -10, bottom: 0 }}>
+                                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={true} stroke="#f1f5f9" />
+                                        <XAxis type="number" hide={true} />
+                                        <YAxis dataKey="name" type="category" tick={{fontSize: 12, fill: '#475569'}} width={150} interval={0} />
+                                        <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                                        
+                                        <Bar dataKey="Casos" radius={[0, 6, 6, 0]} maxBarSize={35} onClick={(data) => setSelectedMotivo(data.name)} style={{cursor: 'pointer'}}>
+                                            {analytics?.chartDataMotivoDep?.map((entry, index) => {
+                                                let barColor = ['#004b87', '#006bbd', '#008ae6', '#1aa3ff'][index % 4];
+                                                const nameLower = entry.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                                if (nameLower.includes('imss')) barColor = '#15803d'; 
+                                                else if (nameLower.includes('infonavit')) barColor = '#881337';
+                                                else if (nameLower.includes('issste')) barColor = '#ea580c';
+                                                else if (nameLower.includes('sat')) barColor = '#0284c7';
+                                                else if (nameLower.includes('citado') || nameLower.includes('cita')) barColor = '#ffd100';
+                                                else if (nameLower.includes('procesar')) barColor = '#006bbd';
+                                                return <Cell key={`c1-${index}`} fill={barColor} />;
+                                            })}
+                                            <LabelList dataKey="Casos" position="right" fill="#0f172a" fontSize={14} fontWeight="bold" />
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="flex flex-col md:flex-row gap-6 h-full">
+                                    {/* Gráfica de Trámites Específicos */}
+                                    <div className={`h-full ${situacionColName ? 'w-full md:w-2/3' : 'w-full'}`}>
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={analytics?.chartDataTramite || []} layout="vertical" margin={{ top: 10, right: 40, left: -10, bottom: 0 }}>
+                                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={true} stroke="#f1f5f9" />
+                                                <XAxis type="number" hide={true} />
+                                                <YAxis dataKey="name" type="category" tick={{fontSize: 11, fill: '#475569'}} width={180} interval={0} />
+                                                <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                                                
+                                                <Bar dataKey="Casos" radius={[0, 6, 6, 0]} maxBarSize={35}>
+                                                    {analytics?.chartDataTramite?.map((entry, index) => (
+                                                        <Cell key={`t-${index}`} fill={['#004b87', '#006bbd', '#008ae6', '#1aa3ff', '#4db8ff'][index % 5]} />
+                                                    ))}
+                                                    <LabelList dataKey="Casos" position="right" fill="#0f172a" fontSize={13} fontWeight="bold" />
+                                                </Bar>
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                    
+                                    {/* Resumen de Situación (Solo visible en Drill-Down) */}
+                                    {situacionColName && (
+                                        <div className="w-full md:w-1/3 h-full bg-blue-50/40 rounded-xl p-5 overflow-y-auto border border-blue-100 flex flex-col">
+                                            <h4 className="font-bold text-[#004b87] mb-4 text-sm uppercase tracking-wider flex items-center gap-2">
+                                                <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                                Resumen de Situación
+                                            </h4>
+                                            <ul className="space-y-3 flex-1">
+                                                {analytics?.resumenSituacion?.map((sit, idx) => (
+                                                    <li key={idx} className="flex justify-between items-start bg-white p-3 rounded-lg shadow-sm border border-gray-100">
+                                                        <span className="text-gray-700 text-sm font-medium pr-3 leading-snug">{sit.name}</span>
+                                                        <span className="font-black text-[#004b87] bg-blue-100/50 px-2.5 py-1 rounded-md text-sm">{sit.value}</span>
+                                                    </li>
+                                                ))}
+                                                {analytics?.resumenSituacion?.length === 0 && (
+                                                    <li className="text-gray-400 text-sm text-center pt-4">No hay datos de situación</li>
+                                                )}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Fila de 3 Gráficas (Ranking, Efectividad, Tipo) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                        {/* Gráfica Nueva - Ranking Top 5 Coordinadores */}
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <h3 className="text-lg font-bold coppel-blue mb-6 border-b pb-4">Top 5 Coordinadores</h3>
+                            <div className="h-[300px]">
+                                {analytics?.top5Coordinadores && analytics.top5Coordinadores.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={analytics.top5Coordinadores} layout="vertical" margin={{ top: 0, right: 30, left: -20, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                                            <XAxis type="number" hide={true} />
+                                            <YAxis dataKey="name" type="category" tick={{fontSize: 10, fill: '#475569'}} width={120} interval={0} />
+                                            <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                                            {escalamientoColName && <Legend verticalAlign="top" height={30} iconType="circle" wrapperStyle={{fontSize: '11px'}} />}
+                                            
+                                            <Bar name="Escal. Válidos" dataKey="Validos" stackId="a" fill="#10b981" radius={escalamientoColName ? [0,0,0,0] : [0, 4, 4, 0]} maxBarSize={25} />
+                                            {escalamientoColName && (
+                                                <Bar name="Escal. Inválidos" dataKey="Invalidos" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} maxBarSize={25}>
+                                                    <LabelList dataKey="Total" position="right" fill="#0f172a" fontSize={12} fontWeight="bold" />
+                                                </Bar>
+                                            )}
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="flex justify-center items-center h-full text-gray-400">Sin datos de coordinadores</div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Gráfica Circular de Efectividad */}
+                        {escalamientoColName && (
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                <h3 className="text-lg font-bold text-gray-800 mb-6 border-b pb-4">Efectividad Global</h3>
+                                <div className="h-[300px]">
+                                    {analytics?.chartDataEscalamiento.length > 0 ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie data={analytics.chartDataEscalamiento} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={4} dataKey="value" labelLine={{ stroke: '#cbd5e1' }} label={({name, percent}) => `${name} (${(percent * 100).toFixed(0)}%)`}>
+                                                    {analytics.chartDataEscalamiento.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={entry.name === 'Válidos' ? '#10b981' : '#ef4444'} />
+                                                    ))}
+                                                </Pie>
+                                                <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                                                <Legend verticalAlign="bottom" height={30} iconType="circle" />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    ) : <div className="flex justify-center items-center h-full text-gray-400">Sin datos</div>}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Gráfica de Tipo */}
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <h3 className="text-lg font-bold coppel-blue mb-6 border-b pb-4">Distribución por Tipo</h3>
+                            <div className="h-[300px]">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie data={analytics?.chartDataTipo || []} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={4} dataKey="value" labelLine={{ stroke: '#cbd5e1' }} label={({name, percent}) => `${name} (${(percent * 100).toFixed(0)}%)`}>
+                                            {analytics?.chartDataTipo.map((entry, index) => <Cell key={`cell-${index}`} fill={['#004b87', '#ffd100', '#10b981', '#f59e0b', '#00a3e0', '#ec4899', '#8b5cf6'][index % 7]} />)}
+                                        </Pie>
+                                        <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                                        <Legend verticalAlign="bottom" height={30} iconType="circle" />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Tabla de Datos */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                        <div className="p-5 bg-[#004b87] text-white flex justify-between items-center">
+                            <h3 className="text-lg font-bold">Bitácora de Trabajadores</h3>
+                            <span className="text-sm bg-blue-800 px-3 py-1 rounded-full">{displayData.length} registros mostrados</span>
+                        </div>
+                        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="sticky top-0 bg-white shadow-sm z-10">
+                                    <tr className="text-gray-600 text-xs uppercase tracking-wider border-b-2 border-gray-200">
+                                        {columns.map((col, idx) => <th key={idx} className="p-4 font-bold whitespace-nowrap bg-gray-50">{col}</th>)}
+                                    </tr>
+                                </thead>
+                                <tbody className="text-gray-700 text-sm">
+                                    {displayData.map((row, rowIndex) => {
+                                        const escVal = escalamientoColName ? String(row[escalamientoColName] || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : '';
+                                        const isInvalid = escVal === 'no' || escVal.includes('invalid');
+                                        
+                                        return (
+                                            <tr key={rowIndex} className={`border-b transition-colors ${isInvalid ? 'bg-red-50 hover:bg-red-100 border-red-100' : 'bg-white hover:bg-blue-50 border-gray-100'}`}>
+                                                {columns.map((col, colIndex) => (
+                                                    <td key={colIndex} className="p-4">
+                                                        <div className="max-w-xs xl:max-w-md truncate" title={row[col]}>
+                                                            {row[col] || <span className="text-gray-300">-</span>}
+                                                        </div>
+                                                    </td>
+                                                ))}
+                                            </tr>
+                                        );
+                                    })}
+                                    {displayData.length === 0 && (
+                                        <tr>
+                                            <td colSpan={columns.length} className="p-10 text-center text-gray-500">
+                                                <p className="text-lg font-semibold mb-1">No se encontraron resultados</p>
+                                                <p className="text-sm">Intenta buscar con otros términos o cambia la selección de la tarjeta superior.</p>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <footer className="mt-8 text-center text-gray-400 text-sm pb-8">
+                        Los datos se sincronizan automáticamente con tu documento de Google Sheets.
+                    </footer>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
