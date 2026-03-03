@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reporte Escalamientos MAO</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js DataLabels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <!-- PapaParse para procesar CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        corpBlue: '#002677', /* Azul Afore Coppel */
+                        corpYellow: '#FFC300', /* Amarillo Afore Coppel */
+                        corpLightBlue: '#0055A5',
+                        warningOrg: '#FF8A00',
+                        dangerRed: '#E63946'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .chart-container { position: relative; height: 250px; width: 100%; }
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 1000;
+        }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans text-gray-800">
+
+    <!-- Pantalla de Carga -->
+    <div id="loader" class="loading-overlay">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-corpBlue mb-4"></div>
+        <p class="text-corpBlue font-bold">Procesando datos del archivo...</p>
+    </div>
+
+    <!-- Navbar -->
+    <nav class="bg-corpBlue text-white p-4 shadow-md border-b-4 border-corpYellow">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center">
+                <img src="image_f72661.png" alt="Logo Afore Coppel" class="h-10 sm:h-12 mr-4 bg-white px-3 py-1.5 rounded shadow-sm object-contain" onerror="this.style.display='none'">
+                <h1 class="text-xl font-bold tracking-wide">Reporte Escalamientos MAO</h1>
+            </div>
+            <div class="hidden sm:block text-sm">
+                <span class="bg-corpYellow text-corpBlue px-3 py-1 rounded-full font-bold shadow-sm">
+                    <i class="fa-solid fa-database mr-2"></i>Datos en Vivo
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mx-auto p-4 lg:p-6 mt-4">
+        
+        <div class="mb-6 flex flex-col md:flex-row md:items-center md:justify-between">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">Escalamientos Analizados - Enero 2026</h2>
+                <p class="text-gray-600 mt-1">Casos que pudieron resolverse en el primer contacto, reduciendo el tiempo de espera para el trabajador.</p>
+            </div>
+            <div class="mt-4 md:mt-0">
+                <button onclick="window.location.reload()" class="bg-white border border-gray-300 px-4 py-2 rounded shadow-sm hover:bg-gray-50 text-sm font-medium transition text-corpBlue">
+                    <i class="fa-solid fa-rotate mr-2"></i>Actualizar
+                </button>
+            </div>
+        </div>
+
+        <!-- Tarjetas Superiores KPI -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Tarjeta KPI Total -->
+            <div class="bg-white rounded-lg shadow p-5 border-l-4 border-corpYellow flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-gray-500 font-semibold uppercase">Total Casos Escalados</p>
+                    <h3 id="kpi-total-casos" class="text-4xl font-bold text-corpBlue mt-1">0</h3>
+                </div>
+                <div class="p-4 bg-gray-50 rounded-full text-corpYellow text-3xl shadow-inner">
+                    <i class="fa-solid fa-folder-open"></i>
+                </div>
+            </div>
+
+            <!-- Tarjeta Insight FCR (Soluciones) Dinámica y Visual -->
+            <div class="bg-white rounded-lg shadow p-5 border-l-4 border-warningOrg lg:col-span-2 flex flex-col justify-center">
+                <div class="flex justify-between items-center mb-3 border-b pb-2">
+                    <div class="flex items-center gap-2">
+                        <h3 class="text-sm text-gray-800 font-bold">
+                            <i class="fa-solid fa-lightbulb text-warningOrg mr-1"></i> Oportunidad de Primer Contacto
+                        </h3>
+                        <span class="text-[10px] bg-warningOrg text-white px-2 py-0.5 rounded-full font-bold shadow-sm uppercase tracking-widest">Prevención</span>
+                    </div>
+                    <!-- Botón para limpiar filtro FCR -->
+                    <button id="btn-clear-fcr" onclick="setFcrFilter('ALL')" class="hidden text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded transition font-bold shadow-sm border border-gray-200">
+                        <i class="fa-solid fa-filter-circle-xmark text-red-500 mr-1"></i> Quitar Filtro
+                    </button>
+                </div>
+                
+                <div class="flex flex-col sm:flex-row items-center gap-6 flex-1 mt-2">
+                    <!-- Gráfica de Dona -->
+                    <div class="w-full sm:w-1/3 relative flex justify-center items-center" style="height: 160px;">
+                        <canvas id="fcrChart"></canvas>
+                        <!-- Icono en el centro de la dona -->
+                        <div id="fcr-chart-center-icon" class="absolute inset-0 flex items-center justify-center pointer-events-none hidden">
+                            <i class="fa-solid fa-bullseye text-gray-200 text-3xl transition-colors duration-300" id="center-icon-element"></i>
+                        </div>
+                    </div>
+                    
+                    <!-- Leyenda interactiva -->
+                    <div id="fcr-solutions-container" class="w-full sm:w-2/3 space-y-1 max-h-[160px] overflow-y-auto pr-2">
+                        <p class="text-xs text-gray-400 italic">Calculando porcentajes...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filtros de Búsqueda -->
+        <div class="bg-white rounded-lg shadow p-5 mb-8">
+            <h3 class="text-sm font-bold text-gray-800 mb-3"><i class="fa-solid fa-filter mr-2"></i>Filtros de Búsqueda</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Día</label>
+                    <select id="filter-fecha" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todos</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Semana</label>
+                    <select id="filter-semana" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todas</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Ciudad</label>
+                    <select id="filter-ciudad" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todas</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Jefe</label>
+                    <select id="filter-jefe" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todos</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Categoría</label>
+                    <select id="filter-categoria" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todas</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Tipo</label>
+                    <select id="filter-tipo" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todos</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Subtipo</label>
+                    <select id="filter-subtipo" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todos</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">Analista</label>
+                    <select id="filter-analista" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-gray-50 focus:outline-none focus:border-corpYellow focus:ring-1 focus:ring-corpYellow transition">
+                        <option value="ALL">Todos</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nueva Gráfica Principal Dinámica -->
+        <div class="bg-white rounded-lg shadow p-5 mb-8">
+            <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-4 border-b pb-2 gap-4">
+                <h3 id="main-chart-title" class="text-lg font-bold text-gray-800">Total de Folios por Analista (Color por Equipo)</h3>
+                
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <!-- Selector de vista -->
+                    <div class="inline-flex rounded-md shadow-sm" role="group">
+                        <button id="btn-view-analista" onclick="setMainChartView('analista')" class="px-3 py-1.5 text-xs font-bold text-corpBlue bg-gray-100 border border-gray-300 rounded-l-md shadow-inner transition">
+                            <i class="fa-solid fa-user mr-1"></i>Analista
+                        </button>
+                        <button id="btn-view-jefe" onclick="setMainChartView('jefe')" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border-t border-b border-gray-300 hover:bg-gray-50 transition">
+                            <i class="fa-solid fa-users-gear mr-1"></i>Jefe
+                        </button>
+                        <button id="btn-view-ciudad" onclick="setMainChartView('ciudad')" class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-l-0 border-gray-300 rounded-r-md hover:bg-gray-50 transition">
+                            <i class="fa-solid fa-city mr-1"></i>Ciudad
+                        </button>
+                    </div>
+
+                    <button id="toggleOrientationBtn" onclick="toggleChartOrientation()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1.5 px-3 rounded shadow-sm transition">
+                        <i class="fa-solid fa-chart-bar mr-1"></i> Ver Horizontal
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-auto w-full border border-gray-100 rounded bg-gray-50/50" style="max-height: 600px;">
+                <div id="analistas-chart-container" class="chart-container" style="height: 500px; width: 100%;">
+                    <canvas id="allAnalistasChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Nueva Leyenda para Jefes -->
+            <div id="jefe-legend" class="flex flex-wrap gap-3 mt-4 justify-center text-xs hidden"></div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow p-5 flex flex-col lg:col-span-2">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 border-b pb-2">
+                    <h3 class="text-lg font-bold text-gray-800">Distribución por Tipo y Subtipo</h3>
+                    <button id="toggleOrientationCatBtn" onclick="toggleCatChartOrientation()" class="mt-2 sm:mt-0 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1.5 px-3 rounded shadow-sm transition">
+                        <i class="fa-solid fa-chart-bar mr-1"></i> Ver Horizontal
+                    </button>
+                </div>
+                <div class="overflow-auto w-full border border-gray-100 rounded bg-gray-50/50 flex-none" style="max-height: 400px;">
+                    <div id="category-chart-container" class="chart-container" style="height: 350px; width: 100%;">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                </div>
+                <!-- Sección dinámica para el resumen de asuntos -->
+                <div class="mt-4 pt-3 border-t border-gray-200 flex-1 flex flex-col min-h-[150px]">
+                    <h4 id="asunto-summary-title" class="text-sm font-bold text-corpBlue mb-2">
+                        <i class="fa-solid fa-list-check mr-1"></i> Top Asuntos (General)
+                    </h4>
+                    <div id="asunto-summary-content" class="overflow-y-auto pr-2 flex-1 max-h-[200px]">
+                        <!-- Lista dinámica -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-5 flex flex-col">
+                <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2"><i class="fa-solid fa-lightbulb text-warningOrg mr-2"></i>Solución</h3>
+                <div id="accion-sugerida-content" class="space-y-3 max-h-[450px] overflow-y-auto pr-2 text-xs flex-1">
+                    <p class="text-gray-500 italic mt-2">Selecciona un bloque en la gráfica de Distribución para ver las soluciones aplicables a esos casos.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="bg-white rounded-lg shadow overflow-hidden mb-12">
+            <div class="px-5 py-4 border-b flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-800">Detalle de Folios Analizados</h3>
+                <span id="row-count" class="text-xs bg-gray-200 px-2 py-1 rounded text-gray-600 font-bold">0 registros</span>
+            </div>
+            <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
+                <table class="w-full text-left text-sm whitespace-nowrap">
+                    <thead class="bg-gray-100 text-gray-600 uppercase text-[10px] sticky top-0 shadow-sm">
+                        <tr>
+                            <th class="px-4 py-3">No. Caso</th>
+                            <th class="px-4 py-3">Ciudad</th>
+                            <th class="px-4 py-3">Jefe</th>
+                            <th class="px-4 py-3">Analista</th>
+                            <th class="px-4 py-3">Tipo</th>
+                            <th class="px-4 py-3">Subtipo</th>
+                            <th class="px-4 py-3">Estatus</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="divide-y divide-gray-200">
+                        <!-- Datos cargados dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSFGJVHhiORDbF42laIxcm_-nVewCzOvYWTgJDxO6DR0EHfJCJpnM3DjkuBnVBkrw/pub?gid=1920596975&single=true&output=csv";
+
+        let charts = {};
+        let globalData = [];
+        
+        // Variables para nombres exactos de columnas
+        let colFecha, colCat, colTipo, colSub, colCreadoPor, colAsunto, colAccion, colCaso;
+        let colCiudad, colJefe, colSolucion; // Nuevas variables
+        
+        // Controladores de estado
+        let currentOrientation = 'x'; 
+        let currentCatOrientation = 'x';
+        let currentMainChartView = 'analista'; 
+        let currentFcrFilter = 'ALL'; // Controlador para el clic en la gráfica de dona
+        let currentFcrTop4 = []; // Guarda las top soluciones para calcular "Otras"
+
+        function setMainChartView(view) {
+            currentMainChartView = view;
+            
+            // Actualizar diseño visual de los botones
+            ['analista', 'jefe', 'ciudad'].forEach(v => {
+                const btn = document.getElementById(`btn-view-${v}`);
+                if (v === view) {
+                    btn.className = `px-3 py-1.5 text-xs font-bold text-corpBlue bg-gray-100 border border-gray-300 ${v==='analista'?'rounded-l-md':v==='ciudad'?'rounded-r-md border-l-0':''} shadow-inner transition`;
+                } else {
+                    btn.className = `px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border${v==='jefe'?'-t border-b':''} border-gray-300 ${v==='analista'?'rounded-l-md':v==='ciudad'?'rounded-r-md border-l-0':''} hover:bg-gray-50 transition`;
+                }
+            });
+
+            // Actualizar el Título de la sección
+            const titles = {
+                'analista': 'Total de Folios por Analista (Color por Equipo)',
+                'jefe': 'Total de Folios por Jefe de Grupo',
+                'ciudad': 'Total de Folios por Ciudad'
+            };
+            document.getElementById('main-chart-title').innerText = titles[view];
+
+            // Re-dibujar solo si ya existen datos procesados
+            if (window.currentFilteredData) {
+                // processDashboardData redibuja gráfica principal y tabla
+                processDashboardData(window.currentFilteredData, true); 
+            }
+        }
+
+        function toggleChartOrientation() {
+            currentOrientation = currentOrientation === 'x' ? 'y' : 'x';
+            
+            const btn = document.getElementById('toggleOrientationBtn');
+            if(currentOrientation === 'y') {
+                btn.innerHTML = '<i class="fa-solid fa-chart-column mr-1"></i> Ver Vertical';
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-chart-bar mr-1"></i> Ver Horizontal';
+            }
+            
+            if(window.currentFilteredData) processDashboardData(window.currentFilteredData, true);
+        }
+
+        function toggleCatChartOrientation() {
+            currentCatOrientation = currentCatOrientation === 'x' ? 'y' : 'x';
+            
+            const btn = document.getElementById('toggleOrientationCatBtn');
+            if(currentCatOrientation === 'y') {
+                btn.innerHTML = '<i class="fa-solid fa-chart-column mr-1"></i> Ver Vertical';
+            } else {
+                btn.innerHTML = '<i class="fa-solid fa-chart-bar mr-1"></i> Ver Horizontal';
+            }
+            
+            if(window.currentFilteredData) processDashboardData(window.currentFilteredData, true);
+        }
+
+        // --- Utilidades para procesamiento de fechas ---
+        function parseDate(dateStr) {
+            if(!dateStr) return null;
+            dateStr = dateStr.trim().split(" ")[0]; 
+            let parts = dateStr.split(/[\/\-]/);
+            if(parts.length === 3) {
+                let d, m, y;
+                if(parts[0].length === 4) { 
+                    y = parseInt(parts[0]); m = parseInt(parts[1]); d = parseInt(parts[2]); 
+                } else { 
+                    d = parseInt(parts[0]); m = parseInt(parts[1]); y = parseInt(parts[2]); 
+                }
+                if(y < 100) y += 2000;
+                const date = new Date(y, m - 1, d);
+                if(!isNaN(date.getTime())) return date;
+            }
+            const fallback = new Date(dateStr);
+            return isNaN(fallback.getTime()) ? null : fallback;
+        }
+
+        function getWeekOfMonth(dateObj) {
+            if(!dateObj) return "Sin Fecha";
+            const dia = dateObj.getDate();
+            const semana = Math.ceil(dia / 7);
+            const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+            const mes = nombresMeses[dateObj.getMonth()];
+            return `Semana ${semana} de ${mes}`;
+        }
+
+        async function init() {
+            Chart.register(ChartDataLabels);
+            Chart.defaults.plugins.datalabels.display = false;
+
+            try {
+                // AGREGADO: Forzar la recarga sin caché añadiendo un parámetro de tiempo
+                const response = await fetch(CSV_URL + "&nocache=" + new Date().getTime(), { cache: 'no-store' });
+                const csvText = await response.text();
+                
+                Papa.parse(csvText, {
+                    header: true,
+                    skipEmptyLines: true,
+                    transformHeader: function(h) {
+                        return h.trim();
+                    },
+                    complete: function(results) {
+                        if(results.data.length > 0) {
+                            const headers = Object.keys(results.data[0]);
+                            colFecha = headers.find(h => h.toLowerCase().includes('fecha')) || "Fecha";
+                            colCat = headers.find(h => h.toLowerCase().includes('categor')) || "Categoria";
+                            colTipo = headers.find(h => h.toLowerCase() === 'tipo' || h.toLowerCase().includes('tipo')) || "Tipo";
+                            colSub = headers.find(h => h.toLowerCase().includes('subtipo')) || "Subtipo";
+                            colCreadoPor = headers.find(h => h.toLowerCase().includes('creado')) || "Creado por";
+                            colAsunto = headers.find(h => h.toLowerCase().includes('asunto')) || "Asunto";
+                            colAccion = headers.find(h => h.toLowerCase().includes('recomendaci') || h.toLowerCase().includes('acci')) || "Recomendacion FCR";
+                            colCaso = headers.find(h => h.toLowerCase().includes('caso') && !h.toLowerCase().includes('estatus')) || "Caso";
+                            
+                            // AGREGADO: Mayor cobertura de palabras clave incluyendo errores de dedo como "cuidad"
+                            colCiudad = headers.find(h => {
+                                const low = h.toLowerCase();
+                                return low.includes('ciudad') || low.includes('cuidad') || low.includes('plaza') || low.includes('sucursal') || low.includes('sede') || low.includes('ubicaci') || low.includes('localidad') || low.includes('centro') || low.includes('zona') || low.includes('regi');
+                            }) || "Ciudad";
+                            
+                            colJefe = headers.find(h => {
+                                const low = h.toLowerCase();
+                                return low.includes('jefe') || low.includes('supervisor') || low.includes('lider') || low.includes('líder') || low.includes('gerente') || low.includes('coord');
+                            }) || "Jefe";
+
+                            // Aseguramos detectar la columna exacta "Solucion" o "Solución", evitando atrapar otras como "Fecha de solucion"
+                            colSolucion = headers.find(h => h.trim().toLowerCase() === 'solucion' || h.trim().toLowerCase() === 'solución') 
+                                       || headers.find(h => h.toLowerCase().includes('soluci') && !h.toLowerCase().includes('fecha')) 
+                                       || "Solucion";
+
+                            console.log("Columnas detectadas -> Ciudad:", colCiudad, "| Jefe:", colJefe, "| Solución:", colSolucion);
+                        }
+
+                        globalData = results.data.filter(row => row["Folio"] || row[colTipo] || row[colCreadoPor]).map(row => {
+                            let dStr = row[colFecha];
+                            let dateObj = parseDate(dStr);
+                            row._semana = getWeekOfMonth(dateObj);
+                            
+                            // Buscamos agresivamente el valor, incluso si la columna tiene espacios ocultos o errores de dedo
+                            let valCiudad = row[colCiudad];
+                            if (!valCiudad) {
+                                let keyAlternativa = Object.keys(row).find(k => k.toLowerCase().includes('ciudad') || k.toLowerCase().includes('cuidad'));
+                                if (keyAlternativa) valCiudad = row[keyAlternativa];
+                            }
+                            row[colCiudad] = (valCiudad && valCiudad.trim() !== "") ? valCiudad.trim() : "Sin Asignar";
+
+                            let valJefe = row[colJefe];
+                            if (!valJefe) {
+                                let keyAlternativa = Object.keys(row).find(k => k.toLowerCase().includes('jefe') || k.toLowerCase().includes('superv'));
+                                if (keyAlternativa) valJefe = row[keyAlternativa];
+                            }
+                            row[colJefe] = (valJefe && valJefe.trim() !== "") ? valJefe.trim() : "Sin Asignar";
+
+                            return row;
+                        });
+                        
+                        populateFilters(globalData);
+                        processDashboardData(globalData, false);
+                        document.getElementById('loader').classList.add('hidden');
+                    }
+                });
+            } catch (error) {
+                console.error("Error cargando el CSV:", error);
+                document.getElementById('loader').innerHTML = `<p class="text-red-600 p-4 text-center">Error al conectar con los datos. <br> Verifica la publicación del archivo.</p>`;
+            }
+        }
+
+        function populateFilters(data) {
+            const fechas = new Set();
+            const semanas = new Set();
+            const ciudades = new Set();
+            const jefes = new Set();
+            const categorias = new Set();
+            const tipos = new Set();
+            const subtipos = new Set();
+            const analistas = new Set();
+
+            data.forEach(row => {
+                if(row[colFecha] && row[colFecha].trim() !== "") fechas.add(row[colFecha].trim());
+                if(row._semana && row._semana !== "Sin Fecha") semanas.add(row._semana);
+                if(row[colCiudad]) ciudades.add(row[colCiudad]);
+                if(row[colJefe]) jefes.add(row[colJefe]);
+                if(row[colCat] && row[colCat].trim() !== "") categorias.add(row[colCat].trim());
+                if(row[colTipo] && row[colTipo].trim() !== "") tipos.add(row[colTipo].trim());
+                if(row[colSub] && row[colSub].trim() !== "") subtipos.add(row[colSub].trim());
+                if(row[colCreadoPor] && row[colCreadoPor].trim() !== "") analistas.add(row[colCreadoPor].trim());
+            });
+
+            fillSelect('filter-fecha', fechas);
+            fillSelect('filter-semana', semanas);
+            fillSelect('filter-ciudad', ciudades);
+            fillSelect('filter-jefe', jefes);
+            fillSelect('filter-categoria', categorias);
+            fillSelect('filter-tipo', tipos);
+            fillSelect('filter-subtipo', subtipos);
+            fillSelect('filter-analista', analistas);
+        }
+
+        function fillSelect(id, setValues) {
+            const select = document.getElementById(id);
+            select.innerHTML = '<option value="ALL">Todos</option>';
+            
+            if(setValues.size === 0) {
+                const opt = document.createElement('option');
+                opt.value = "ALL";
+                opt.textContent = "Sin datos";
+                select.appendChild(opt);
+                return;
+            }
+
+            Array.from(setValues).sort().forEach(val => {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = val;
+                select.appendChild(opt);
+            });
+        }
+
+        function applyFilters() {
+            const fFecha = document.getElementById('filter-fecha').value;
+            const fSemana = document.getElementById('filter-semana').value;
+            const fCiudad = document.getElementById('filter-ciudad').value;
+            const fJefe = document.getElementById('filter-jefe').value;
+            const fCat = document.getElementById('filter-categoria').value;
+            const fTipo = document.getElementById('filter-tipo').value;
+            const fSub = document.getElementById('filter-subtipo').value;
+            const fAnalista = document.getElementById('filter-analista').value;
+
+            // Restablecer el filtro interactivo FCR al cambiar un filtro principal
+            currentFcrFilter = 'ALL';
+            const btnClear = document.getElementById('btn-clear-fcr');
+            if (btnClear) btnClear.classList.add('hidden');
+            const centerIcon = document.getElementById('center-icon-element');
+            if (centerIcon) { centerIcon.classList.remove('text-corpBlue'); centerIcon.classList.add('text-gray-200'); }
+
+            const filtered = globalData.filter(row => {
+                const matchFecha = fFecha === 'ALL' || (row[colFecha] && row[colFecha].trim() === fFecha);
+                const matchSemana = fSemana === 'ALL' || row._semana === fSemana;
+                const matchCiudad = fCiudad === 'ALL' || row[colCiudad] === fCiudad;
+                const matchJefe = fJefe === 'ALL' || row[colJefe] === fJefe;
+                const matchCat = fCat === 'ALL' || (row[colCat] && row[colCat].trim() === fCat);
+                const matchTipo = fTipo === 'ALL' || (row[colTipo] && row[colTipo].trim() === fTipo);
+                const matchSub = fSub === 'ALL' || (row[colSub] && row[colSub].trim() === fSub);
+                const matchAnalista = fAnalista === 'ALL' || (row[colCreadoPor] && row[colCreadoPor].trim() === fAnalista);
+                
+                return matchFecha && matchSemana && matchCiudad && matchJefe && matchCat && matchTipo && matchSub && matchAnalista;
+            });
+
+            processDashboardData(filtered, false);
+        }
+
+        // Dividimos el proceso: La dona se alimenta de "data", y el resto del tablero se alimenta de "subData" filtrada
+        function processDashboardData(data, isViewChange = false) {
+            window.currentFilteredData = data;
+            
+            // 1. Dibuja la sección FCR con los datos base
+            renderFcrChart(data);
+
+            // 2. Dibuja el resto del tablero (con filtro FCR si hay uno activo)
+            updateSubDashboard(isViewChange);
+        }
+
+        // Funciones para interactividad visual de FCR
+        function highlightFcrSlice(index) {
+            if (!charts.fcrChart) return;
+            charts.fcrChart.setActiveElements([{datasetIndex: 0, index: index}]);
+            charts.fcrChart.update();
+        }
+
+        function removeFcrHighlight() {
+            if (!charts.fcrChart) return;
+            charts.fcrChart.setActiveElements([]);
+            charts.fcrChart.update();
+        }
+
+        function setFcrFilter(solucion) {
+            currentFcrFilter = solucion;
+            
+            const btnClear = document.getElementById('btn-clear-fcr');
+            const centerIcon = document.getElementById('center-icon-element');
+            
+            if(solucion === 'ALL') {
+                if(btnClear) btnClear.classList.add('hidden');
+                if(centerIcon) { centerIcon.classList.remove('text-corpBlue'); centerIcon.classList.add('text-gray-200'); }
+            } else {
+                if(btnClear) btnClear.classList.remove('hidden');
+                if(centerIcon) { centerIcon.classList.remove('text-gray-200'); centerIcon.classList.add('text-corpBlue'); }
+            }
+            
+            // Redibujamos para aplicar estilos de "activo" en la lista de dona
+            renderFcrChart(window.currentFilteredData); 
+            // Filtramos la parte inferior del tablero
+            updateSubDashboard(false);
+        }
+
+        function renderFcrChart(data) {
+            const total = data.length;
+            let countSoluciones = {};
+            data.forEach(row => {
+                let sol = row[colSolucion] ? row[colSolucion].trim() : "";
+                if(sol && sol !== "-" && sol.toLowerCase() !== "n/a" && sol.toLowerCase() !== "na") {
+                    countSoluciones[sol] = (countSoluciones[sol] || 0) + 1;
+                }
+            });
+
+            const solucionesOrdenadas = Object.entries(countSoluciones).sort((a, b) => b[1] - a[1]);
+            const topSoluciones = solucionesOrdenadas.slice(0, 4); 
+            currentFcrTop4 = topSoluciones.map(s => s[0]); // Guardamos top 4 para identificar "Otras"
+
+            const otrosCount = solucionesOrdenadas.slice(4).reduce((sum, item) => sum + item[1], 0);
+            if (otrosCount > 0) {
+                topSoluciones.push(['Otras soluciones', otrosCount]);
+            }
+
+            const fcrContainer = document.getElementById('fcr-solutions-container');
+            const centerIcon = document.getElementById('fcr-chart-center-icon');
+            
+            if (charts.fcrChart) charts.fcrChart.destroy();
+
+            if (fcrContainer) {
+                if (topSoluciones.length === 0 || total === 0) {
+                    fcrContainer.innerHTML = '<p class="text-xs text-gray-500 italic mt-4 text-center">No hay datos de solución registrados para esta selección.</p>';
+                    if(centerIcon) centerIcon.classList.add('hidden');
+                } else {
+                    const fcrColors = ['#002677', '#FFC300', '#0055A5', '#FF8A00', '#9CA3AF'];
+                    
+                    let htmlFcr = '';
+                    topSoluciones.forEach((item, index) => {
+                        const solucion = item[0];
+                        const cantidad = item[1];
+                        const pct = Math.round((cantidad / total) * 100);
+                        const color = fcrColors[index % fcrColors.length];
+                        
+                        // Lógica de Highlight y Selección
+                        const isActive = currentFcrFilter === solucion;
+                        const bgClass = isActive ? 'bg-blue-50' : 'hover:bg-gray-50';
+                        const borderClass = isActive ? `border-l-4` : `border-l-4 border-transparent`;
+                        const dynamicBorderColor = isActive ? color : 'transparent';
+                        const textClass = isActive ? 'text-corpBlue font-bold' : 'text-gray-700';
+
+                        htmlFcr += `
+                            <div class="fcr-legend-item cursor-pointer flex items-center justify-between group py-1.5 pr-1.5 transition border-b border-gray-100 last:border-0 ${bgClass} ${borderClass}"
+                                 style="border-left-color: ${dynamicBorderColor};"
+                                 onmouseenter="highlightFcrSlice(${index})"
+                                 onmouseleave="removeFcrHighlight()"
+                                 onclick="setFcrFilter('${solucion.replace(/'/g, "\\'")}')">
+                                <div class="flex items-center gap-2 overflow-hidden flex-1 pl-1">
+                                    <span class="w-3 h-3 rounded-full flex-shrink-0 shadow-sm" style="background-color: ${color};"></span>
+                                    <span class="text-xs font-medium ${textClass} truncate" title="${solucion}">${solucion}</span>
+                                </div>
+                                <div class="flex items-center gap-3 ml-2 flex-shrink-0">
+                                    <span class="text-[10px] text-gray-400 font-medium w-12 text-right">${cantidad} casos</span>
+                                    <span class="text-sm font-bold w-10 text-right" style="color: ${color};">${pct}%</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    fcrContainer.innerHTML = htmlFcr;
+                    if(centerIcon) centerIcon.classList.remove('hidden');
+
+                    const fcrCtx = document.getElementById('fcrChart').getContext('2d');
+                    charts.fcrChart = new Chart(fcrCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: topSoluciones.map(s => s[0]),
+                            datasets: [{
+                                data: topSoluciones.map(s => s[1]),
+                                backgroundColor: fcrColors,
+                                borderWidth: 3, // Borde un poco más grueso para separar colores
+                                borderColor: '#ffffff',
+                                hoverOffset: 6 // Efecto de expansión más notorio
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '55%', // Hace las rebanadas más gruesas para que quepa el texto
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                                    titleColor: '#1F2937',
+                                    bodyColor: '#4B5563',
+                                    borderColor: '#E5E7EB',
+                                    borderWidth: 1,
+                                    padding: 10,
+                                    boxPadding: 4,
+                                    callbacks: {
+                                        label: function(context) {
+                                            const val = context.raw;
+                                            const pct = Math.round((val / total) * 100);
+                                            return ` ${val} casos (${pct}%)`;
+                                        }
+                                    }
+                                },
+                                datalabels: { 
+                                    display: function(context) {
+                                        // Solo mostrar el número si es mayor al 5% para que no se amontonen textos en rebanadas diminutas
+                                        const val = context.dataset.data[context.dataIndex];
+                                        const pct = Math.round((val / total) * 100);
+                                        return pct > 5; 
+                                    },
+                                    color: '#ffffff',
+                                    font: { weight: 'bold', size: 12 },
+                                    formatter: function(value, context) {
+                                        const pct = Math.round((value / total) * 100);
+                                        return pct + '%';
+                                    },
+                                    textStrokeColor: 'rgba(0, 0, 0, 0.3)', // Borde sutil oscuro alrededor del texto blanco
+                                    textStrokeWidth: 3
+                                }
+                            },
+                            onHover: (event, elements) => {
+                                event.native.target.style.cursor = elements[0] ? 'pointer' : 'default';
+                                if (elements.length > 0) {
+                                    const idx = elements[0].index;
+                                    document.querySelectorAll('.fcr-legend-item').forEach((el, i) => {
+                                        if (i === idx) el.classList.add('bg-gray-100');
+                                        else el.classList.remove('bg-gray-100');
+                                    });
+                                } else {
+                                    document.querySelectorAll('.fcr-legend-item').forEach(el => el.classList.remove('bg-gray-100'));
+                                }
+                            },
+                            onClick: (event, elements) => {
+                                if (elements.length > 0) {
+                                    const idx = elements[0].index;
+                                    const clickedSolucion = charts.fcrChart.data.labels[idx];
+                                    setFcrFilter(clickedSolucion);
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        // Sub-Tablero: Actualiza Total, Gráficas y Tablas aplicando el filtro FCR si existe
+        function updateSubDashboard(isViewChange = false) {
+            let data = window.currentFilteredData || [];
+            
+            // Aplicar el filtro FCR si está activo
+            if (currentFcrFilter !== 'ALL') {
+                data = data.filter(row => {
+                    let sol = row[colSolucion] ? row[colSolucion].trim() : "";
+                    if (currentFcrFilter === 'Otras soluciones') {
+                        return sol && sol !== "-" && sol.toLowerCase() !== "na" && sol.toLowerCase() !== "n/a" && !currentFcrTop4.includes(sol);
+                    }
+                    return sol === currentFcrFilter;
+                });
+            }
+
+            const total = data.length;
+            const kpiTotalCasos = document.getElementById('kpi-total-casos');
+            if(kpiTotalCasos) kpiTotalCasos.innerText = total;
+
+            const tipos = {};
+            const tableBody = document.getElementById('table-body');
+            tableBody.innerHTML = '';
+
+            data.forEach(row => {
+                // Tipos y Subtipos
+                const t = row[colTipo] || "No Definido";
+                const s = row[colSub] || "No Definido";
+                if (!tipos[t]) tipos[t] = {};
+                tipos[t][s] = (tipos[t][s] || 0) + 1;
+
+                // Para la tabla
+                const a = row[colCreadoPor] || "Desconocido";
+                const c = row[colCiudad] || "Sin Ciudad";
+                const j = row[colJefe] || "Sin Jefe";
+                const colEstatus = Object.keys(row).find(k => k.toLowerCase().includes('estatus')) || "Estatus de caso";
+
+                // Construir fila de tabla con las columnas extra
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-gray-50 transition";
+                tr.innerHTML = `
+                    <td class="px-4 py-3 font-medium text-gray-800">${row[colCaso] || '-'}</td>
+                    <td class="px-4 py-3 text-gray-600 text-xs">${c}</td>
+                    <td class="px-4 py-3 text-gray-600 text-xs">${j}</td>
+                    <td class="px-4 py-3 truncate max-w-[150px] font-medium">${a}</td>
+                    <td class="px-4 py-3">${t}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500">${row[colSub] || '-'}</td>
+                    <td class="px-4 py-3">
+                        <span class="text-[10px] px-2 py-1 bg-green-100 text-green-800 rounded uppercase font-bold">${row[colEstatus] || 'CERRADO'}</span>
+                    </td>
+                `;
+                tableBody.appendChild(tr);
+            });
+
+            document.getElementById('row-count').innerText = `${total} registros`;
+
+            updateCharts(tipos, data);
+            
+            if (!isViewChange) {
+                mostrarResumenAsuntos('ALL', 'ALL'); 
+            }
+        }
+
+        function updateCharts(tiposData, filteredData) {
+            Chart.defaults.font.family = "'Inter', sans-serif";
+            Chart.defaults.color = '#6B7280';
+
+            if (charts.catChart) charts.catChart.destroy();
+            if (charts.ansChart) charts.ansChart.destroy();
+
+            // === 1. Gráfica de Tipos y Subtipos ===
+            const labelsTipos = Object.keys(tiposData);
+            const todosSubtipos = new Set();
+            labelsTipos.forEach(t => Object.keys(tiposData[t]).forEach(s => todosSubtipos.add(s)));
+
+            const basePalette = ['#002677', '#FFC300', '#0055A5', '#FFD633', '#1F2937', '#9CA3AF', '#3B82F6', '#F59E0B', '#10B981', '#6366F1'];
+            let colorIndex = 0;
+
+            const datasetsCat = Array.from(todosSubtipos).map(subtipo => {
+                const dataValues = labelsTipos.map(t => tiposData[t][subtipo] || 0);
+                const color = basePalette[colorIndex % basePalette.length];
+                colorIndex++;
+                return { label: subtipo, data: dataValues, backgroundColor: color, borderRadius: 2 };
+            });
+            
+            const ctxCat = document.getElementById('categoryChart').getContext('2d');
+            const isCatVertical = currentCatOrientation === 'x';
+            const catChartContainer = document.getElementById('category-chart-container');
+            
+            if (isCatVertical) {
+                catChartContainer.style.height = '350px';
+                catChartContainer.style.width = `${Math.max(400, labelsTipos.length * 50)}px`;
+            } else {
+                catChartContainer.style.width = '100%';
+                catChartContainer.style.height = `${Math.max(350, labelsTipos.length * 40)}px`;
+            }
+
+            const xCatAxisOpts = isCatVertical ? { stacked: true, ticks: { font: { size: 10 }, maxRotation: 90, minRotation: 90 }, grid: { display: false } } : { stacked: true, beginAtZero: true, ticks: { font: { size: 10 } } };
+            const yCatAxisOpts = isCatVertical ? { stacked: true, beginAtZero: true, ticks: { font: { size: 10 } } } : { stacked: true, ticks: { font: { size: 10 } }, grid: { display: false } };
+
+            const stackedTotalsPlugin = {
+                id: 'stackedTotals',
+                afterDatasetsDraw: (chart) => {
+                    const { ctx, data } = chart;
+                    ctx.save(); ctx.font = 'bold 11px Inter, sans-serif'; ctx.fillStyle = '#1F2937';
+                    const isHorizontal = chart.options.indexAxis === 'y';
+                    ctx.textAlign = isHorizontal ? 'left' : 'center'; ctx.textBaseline = isHorizontal ? 'middle' : 'bottom';
+                    for (let i = 0; i < data.labels.length; i++) {
+                        let total = 0, maxPos = isHorizontal ? 0 : chart.chartArea.bottom, elementFound = false, xPos = 0, yPos = 0;
+                        for (let j = 0; j < data.datasets.length; j++) {
+                            const meta = chart.getDatasetMeta(j);
+                            if (!meta.hidden) {
+                                const val = data.datasets[j].data[i] || 0;
+                                total += val;
+                                if (val > 0 && meta.data[i]) {
+                                    elementFound = true;
+                                    if (isHorizontal) { maxPos = Math.max(maxPos, meta.data[i].x); yPos = meta.data[i].y; } 
+                                    else { maxPos = Math.min(maxPos, meta.data[i].y); xPos = meta.data[i].x; }
+                                }
+                            }
+                        }
+                        if (total > 0 && elementFound) {
+                            if (isHorizontal) ctx.fillText(total, maxPos + 6, yPos); else ctx.fillText(total, xPos, maxPos - 6);
+                        }
+                    }
+                    ctx.restore();
+                }
+            };
+
+            charts.catChart = new Chart(ctxCat, {
+                type: 'bar', plugins: [stackedTotalsPlugin], data: { labels: labelsTipos, datasets: datasetsCat },
+                options: {
+                    indexAxis: currentCatOrientation, responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { top: isCatVertical ? 20 : 0, right: isCatVertical ? 0 : 30 } },
+                    onHover: (event, chartElement) => { event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default'; },
+                    onClick: (event, elements) => {
+                        if (elements.length > 0) {
+                            const datasetIndex = elements[0].datasetIndex; const dataIndex = elements[0].index;
+                            mostrarResumenAsuntos(labelsTipos[dataIndex], datasetsCat[datasetIndex].label);
+                        } else { mostrarResumenAsuntos('ALL', 'ALL'); }
+                    },
+                    plugins: {
+                        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } },
+                        datalabels: { 
+                            display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                            color: '#ffffff', font: { weight: 'bold', size: 9 }
+                        }
+                    },
+                    scales: { x: xCatAxisOpts, y: yCatAxisOpts }
+                }
+            });
+
+            // === 2. Gráfica Principal Dinámica (Analista, Jefe o Ciudad) ===
+            const mainDataAgg = {};
+            const analistaToJefeMap = {}; // Para colorear barras
+            const analistaToCiudadMap = {}; // Para el tooltip
+
+            filteredData.forEach(row => {
+                const a = row[colCreadoPor] || "Desconocido";
+                const j = row[colJefe] || "Sin Asignar";
+                const c = row[colCiudad] || "Sin Asignar";
+
+                analistaToJefeMap[a] = j;
+                analistaToCiudadMap[a] = c;
+
+                let key = currentMainChartView === 'analista' ? a : currentMainChartView === 'jefe' ? j : c;
+                mainDataAgg[key] = (mainDataAgg[key] || 0) + 1;
+            });
+
+            const sortedMainData = Object.entries(mainDataAgg).sort((a,b) => b[1] - a[1]);
+            const mainLabels = sortedMainData.map(x => x[0]);
+            const mainValues = sortedMainData.map(x => x[1]);
+
+            // Asignar colores dinámicos (Idea 5) y construir Leyenda
+            let backgroundColors = '#002677';
+            const legendEl = document.getElementById('jefe-legend');
+
+            if (currentMainChartView === 'analista') {
+                // Color distinto por cada Jefe
+                const jefesUnicos = Array.from(new Set(Object.values(analistaToJefeMap)));
+                const jefeColorMap = {};
+                jefesUnicos.forEach((j, i) => { jefeColorMap[j] = basePalette[i % basePalette.length]; });
+                
+                backgroundColors = mainLabels.map(analista => jefeColorMap[analistaToJefeMap[analista]] || '#002677');
+                
+                // Mostrar la leyenda
+                if (legendEl) {
+                    legendEl.classList.remove('hidden');
+                    let legendHtml = '';
+                    jefesUnicos.forEach(j => {
+                        legendHtml += `<div class="flex items-center bg-gray-50 border border-gray-200 px-2 py-1.5 rounded shadow-sm"><span class="w-3 h-3 rounded-full mr-2 inline-block" style="background-color: ${jefeColorMap[j]};"></span><span class="text-gray-700 font-medium">${j}</span></div>`;
+                    });
+                    legendEl.innerHTML = legendHtml;
+                }
+            } else {
+                if (currentMainChartView === 'jefe') {
+                    // Alternar colores suavemente para jefes
+                    backgroundColors = mainLabels.map((_, i) => basePalette[i % basePalette.length]);
+                }
+                // Ocultar la leyenda
+                if (legendEl) legendEl.classList.add('hidden');
+            }
+
+            const ctxAns = document.getElementById('allAnalistasChart').getContext('2d');
+            const isVertical = currentOrientation === 'x';
+            const chartContainer = document.getElementById('analistas-chart-container');
+            
+            if (isVertical) {
+                chartContainer.style.height = '500px';
+                chartContainer.style.width = `${Math.max(800, mainLabels.length * 35)}px`;
+            } else {
+                chartContainer.style.width = '100%';
+                chartContainer.style.height = `${Math.max(500, mainLabels.length * 30)}px`;
+            }
+
+            const xAxisOpts = isVertical ? { ticks: { font: { size: 10 }, maxRotation: 90, minRotation: 90 }, grid: { display: false } } : { beginAtZero: true, ticks: { font: { size: 10 } }, grace: '5%' };
+            const yAxisOpts = isVertical ? { beginAtZero: true, ticks: { font: { size: 10 } }, grace: '10%' } : { ticks: { font: { size: 10 } }, grid: { display: false } };
+
+            charts.ansChart = new Chart(ctxAns, {
+                type: 'bar',
+                data: {
+                    labels: mainLabels,
+                    datasets: [{
+                        label: 'Total de Folios',
+                        data: mainValues,
+                        backgroundColor: backgroundColors,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    indexAxis: currentOrientation,
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                // Agregamos el nombre del Jefe y la Ciudad en el cuadro emergente si estamos viendo Analistas
+                                afterLabel: function(context) {
+                                    if(currentMainChartView === 'analista') {
+                                        const analista = context.label;
+                                        return [
+                                            `Jefe: ${analistaToJefeMap[analista] || 'Sin Asignar'}`,
+                                            `Ciudad: ${analistaToCiudadMap[analista] || 'Sin Asignar'}`
+                                        ];
+                                    }
+                                    return '';
+                                }
+                            }
+                        },
+                        datalabels: {
+                            display: true, color: '#4B5563', anchor: 'end', align: isVertical ? 'top' : 'right',
+                            font: { weight: 'bold', size: 10 }
+                        }
+                    },
+                    scales: { x: xAxisOpts, y: yAxisOpts }
+                }
+            });
+        }
+
+        // Función dinámica para mostrar el detalle de asuntos
+        function mostrarResumenAsuntos(tipo, subtipo) {
+            const titleEl = document.getElementById('asunto-summary-title');
+            const contentEl = document.getElementById('asunto-summary-content');
+            let filtered = window.currentFilteredData || [];
+            
+            if (tipo === 'ALL' && subtipo === 'ALL') {
+                titleEl.innerHTML = `<i class="fa-solid fa-list-check mr-1"></i> Top Asuntos (General)`;
+            } else {
+                titleEl.innerHTML = `<i class="fa-solid fa-filter mr-1"></i> Asuntos de: <span class="text-gray-800">${subtipo}</span> <br><span class="text-[10px] font-normal text-gray-500">Categoría: ${tipo}</span>`;
+                filtered = filtered.filter(row => row[colTipo] === tipo && row[colSub] === subtipo);
+            }
+            
+            const countAsuntos = {};
+            filtered.forEach(row => {
+                const a = row[colAsunto] || row["Asunto"] || "No Definido";
+                countAsuntos[a] = (countAsuntos[a] || 0) + 1;
+            });
+            
+            const asuntosOrdenados = Object.entries(countAsuntos).sort((a, b) => b[1] - a[1]);
+            
+            if (asuntosOrdenados.length === 0) {
+                contentEl.innerHTML = '<p class="text-xs text-gray-500 italic">No hay asuntos para mostrar.</p>';
+                return;
+            }
+
+            let html = '<ul class="space-y-2 mt-2">';
+            asuntosOrdenados.forEach(([asunto, cantidad]) => {
+                html += `
+                    <li class="flex justify-between items-center text-xs border-b border-gray-100 pb-1 hover:bg-gray-50 transition p-1">
+                        <span class="text-gray-700 font-medium truncate pr-2" title="${asunto}">${asunto}</span>
+                        <span class="font-bold bg-yellow-100 text-corpBlue px-2 py-0.5 rounded-full shadow-sm">${cantidad}</span>
+                    </li>
+                `;
+            });
+            html += '</ul>';
+            contentEl.innerHTML = html;
+
+            // LÓGICA DE ACCIÓN SUGERIDA
+            const accionEl = document.getElementById('accion-sugerida-content');
+            if (tipo === 'ALL' && subtipo === 'ALL') {
+                accionEl.innerHTML = '<p class="text-gray-500 italic mt-2">Selecciona un bloque en la gráfica de Distribución (por Tipo y Subtipo) para ver las soluciones aplicables a esos casos.</p>';
+            } else {
+                const soluciones = new Set();
+                filtered.forEach(row => {
+                    const sol = row[colSolucion] || row["Solucion"] || "";
+                    if (sol.trim() !== "" && sol.trim() !== "-" && sol.toLowerCase() !== "na" && sol.toLowerCase() !== "n/a") {
+                        soluciones.add(sol.trim());
+                    }
+                });
+
+                if (soluciones.size === 0) {
+                    accionEl.innerHTML = '<p class="text-gray-500 italic mt-2">No hay soluciones registradas para este subtipo.</p>';
+                } else {
+                    let htmlSoluciones = '<div class="space-y-3 mt-2">';
+                    soluciones.forEach(sol => {
+                        htmlSoluciones += `
+                            <div class="p-3 bg-gray-50 border-l-4 border-corpYellow rounded shadow-sm">
+                                <p class="text-gray-800 font-medium leading-relaxed">${sol}</p>
+                            </div>
+                        `;
+                    });
+                    htmlSoluciones += '</div>';
+                    accionEl.innerHTML = htmlSoluciones;
+                }
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
